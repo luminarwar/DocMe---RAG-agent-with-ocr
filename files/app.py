@@ -1,14 +1,3 @@
-# =============================================================================
-#  DocMind — RAG Chatbot
-#  Accepts: PDF files  +  Images (PNG, JPG, JPEG, TIFF, BMP, WEBP)
-#  Stack:   Streamlit · PaddleOCR v3 · LangChain · Groq · OpenAI Embeddings
-#
-#  pip install streamlit python-dotenv pdf2image numpy pypdf Pillow \
-#              paddleocr langchain langchain-core langchain-community \
-#              langchain-openai langchain-groq
-#
-#  .env → OPENAI_API_KEY=...   GROQ_API_KEY=...
-# =============================================================================
 
 from __future__ import annotations
 
@@ -41,9 +30,7 @@ from paddleocr import PaddleOCR
 from pdf2image import convert_from_path
 
 
-# =============================================================================
-#  Config
-# =============================================================================
+
 
 UPLOAD_DIR    = "./doc_files/"
 CHUNK_SIZE    = 1000
@@ -59,9 +46,7 @@ IMAGE_TYPES = ["png", "jpg", "jpeg", "tiff", "bmp", "webp"]
 ALL_TYPES   = PDF_TYPES + IMAGE_TYPES
 
 
-# =============================================================================
-#  Session state
-# =============================================================================
+
 
 for _k, _v in {
     "ready":        False,
@@ -75,9 +60,7 @@ for _k, _v in {
         st.session_state[_k] = _v
 
 
-# =============================================================================
-#  PaddleOCR v3  —  cached singleton, predict() API
-# =============================================================================
+
 
 @st.cache_resource(show_spinner="Loading OCR model…")
 def load_ocr() -> PaddleOCR:
@@ -128,9 +111,7 @@ def ocr_image_file(image_path: str) -> str:
     return ocr_numpy(np.array(img))
 
 
-# =============================================================================
-#  Ingestion helpers
-# =============================================================================
+
 
 def _ingest_pdf(path: str, log: list[str]) -> list[Document]:
     """Load a PDF; OCR any scanned/image-only pages."""
@@ -230,9 +211,7 @@ def ingest_all(directory: str) -> bool:
     return True
 
 
-# =============================================================================
-#  RAG query
-# =============================================================================
+
 
 SYSTEM_PROMPT = """\
 You are DocMind, a precise document-analysis assistant.
@@ -279,9 +258,6 @@ def ask(question: str) -> str:
     return response.content
 
 
-# =============================================================================
-#  UI
-# =============================================================================
 
 st.markdown("""
 <style>
@@ -314,7 +290,7 @@ header[data-testid="stHeader"] { display: none; }
 """, unsafe_allow_html=True)
 
 
-# ── sidebar ───────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.markdown("## 📄 DocMind")
     st.caption("PDFs and images · Answers grounded in your files")
@@ -327,7 +303,7 @@ with st.sidebar:
 
     st.divider()
 
-    # ── uploader accepts both PDFs and images ─────────────────────────────────
+   
     files = st.file_uploader(
         "Upload PDFs or images",
         type=ALL_TYPES,
@@ -355,14 +331,14 @@ with st.sidebar:
                 st.session_state.messages = []
                 st.rerun()
 
-    # ── ingestion log ─────────────────────────────────────────────────────────
+   
     if st.session_state.process_log:
         st.divider()
         st.markdown("**Ingestion log**")
         for entry in st.session_state.process_log:
             st.markdown(f"<small>{entry}</small>", unsafe_allow_html=True)
 
-    # ── loaded files ──────────────────────────────────────────────────────────
+    
     if st.session_state.doc_names:
         st.divider()
         st.markdown("**Loaded files**")
@@ -379,8 +355,8 @@ with st.sidebar:
     st.caption("Groq · LangChain · OpenAI Embeddings · PaddleOCR v3")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
-st.markdown("# DocMind")
+
+st.markdown("# DocMe")
 st.caption("Ask questions about your uploaded PDFs and images.")
 st.divider()
 
