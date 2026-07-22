@@ -1,7 +1,7 @@
-
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +10,6 @@ from dotenv import load_dotenv
 from PIL import Image
 
 load_dotenv()
-
-st.set_page_config(
-    page_title="DocMe",
-    page_icon="📄",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import InMemoryVectorStore
@@ -29,10 +22,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from paddleocr import PaddleOCR
 from pdf2image import convert_from_path
 
-
-
-
-UPLOAD_DIR    = "./doc_files/"
+UPLOAD_DIR    = "./files/doc_files/"
 CHUNK_SIZE    = 1000
 CHUNK_OVERLAP = 200
 TOP_K         = 6
@@ -46,25 +36,15 @@ IMAGE_TYPES = ["png", "jpg", "jpeg", "tiff", "bmp", "webp"]
 ALL_TYPES   = PDF_TYPES + IMAGE_TYPES
 
 
-
-
-for _k, _v in {
-    "ready":        False,
-    "vector_store": None,
-    "llm":          None,
-    "messages":     [],
-    "doc_names":    [],
-    "process_log":  [],
-}.items():
-    if _k not in st.session_state:
-        st.session_state[_k] = _v
-
-
+def get_upload_dir() -> str:
+    path = os.path.join(UPLOAD_DIR, st.session_state.session_id)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 @st.cache_resource(show_spinner="Loading OCR model…")
 def load_ocr() -> PaddleOCR:
-    return PaddleOCR(lang="en")
+    return PaddleOCR(lang="en", show_log=False, use_angle_cls=True)
 
 
 def _parse_result(result_obj) -> str:
@@ -111,14 +91,21 @@ def ocr_image_file(image_path: str) -> str:
     return ocr_numpy(np.array(img))
 
 
-
-
 def _ingest_pdf(path: str, log: list[str]) -> list[Document]:
     """Load a PDF; OCR any scanned/image-only pages."""
     docs: list[Document] = []
     pages = PyPDFLoader(path).load()
 
-    for page in pages:
+    total_pages = len(pages)
+    if total_pages > 1:
+        progress_text = f"Processing {Path(path).name}..."
+        progress_bar = st.progress(0.0, text=progress_text)
+    else:
+        progress_bar = None
+
+    for idx, page in enumerate(pages):
+        if progress_bar:
+            progress_bar.progress((idx) / total_pages, text=f"{progress_text} (page {idx+1}/{total_pages})")
         text     = page.page_content.strip()
         page_idx = page.metadata.get("page", 0)
         label    = f"{Path(path).name} p.{page_idx + 1}"
@@ -136,6 +123,9 @@ def _ingest_pdf(path: str, log: list[str]) -> list[Document]:
                 log.append(f"PDF OCR  ✓  {label}")
             else:
                 log.append(f"PDF OCR  ✗  {label}  (blank)")
+
+    if progress_bar:
+        progress_bar.empty()
 
     return docs
 
@@ -188,7 +178,8 @@ def ingest_all(directory: str) -> bool:
         return False
 
     chunks = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
+        chunk_size=st.session_state.chunk_size,
+        chunk_overlap=st.session_state.chunk_overlap,
     ).split_documents(usable)
 
     vector_store = InMemoryVectorStore.from_documents(
@@ -197,7 +188,7 @@ def ingest_all(directory: str) -> bool:
     )
 
     st.session_state.vector_store = vector_store
-    st.session_state.llm          = ChatGroq(model=LLM_MODEL)
+    st.session_state.llm          = ChatGroq(model=st.session_state.llm_model)
     st.session_state.ready        = True
 
     n_pdf = sum(1 for d in all_docs if d.metadata.get("source", "").endswith(".pdf")
@@ -209,8 +200,6 @@ def ingest_all(directory: str) -> bool:
     ] + log
 
     return True
-
-
 
 
 SYSTEM_PROMPT = """\
@@ -230,7 +219,7 @@ Rules:
 
 
 def ask(question: str) -> str:
-    hits = st.session_state.vector_store.similarity_search(question, k=TOP_K)
+    hits = st.session_state.vector_store.similarity_search(question, k=st.session_state.top_k)
     if not hits:
         return "No relevant passages found in the uploaded files."
 
@@ -256,132 +245,3 @@ def ask(question: str) -> str:
         HumanMessage(content=f"DOCUMENT CONTEXT:\n\n{context}\n\n---\n\nQUESTION: {question}"),
     ])
     return response.content
-
-
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-section[data-testid="stSidebar"] {
-    background: #0d0f17;
-    border-right: 1px solid #1c1f2e;
-}
-section[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
-header[data-testid="stHeader"] { display: none; }
-.stButton > button {
-    width: 100%;
-    background: linear-gradient(135deg, #6366f1, #4f46e5);
-    color: #fff !important;
-    border: none;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    padding: 0.55rem 1rem;
-    transition: opacity 0.2s;
-}
-.stButton > button:hover { opacity: 0.85; }
-[data-testid="stChatMessage"] {
-    border-radius: 14px;
-    padding: 0.5rem 0.8rem;
-    margin-bottom: 0.3rem;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-
-with st.sidebar:
-    st.markdown("## 📄 DocMind")
-    st.caption("PDFs and images · Answers grounded in your files")
-
-    try:
-        import paddleocr as _poc
-        st.success(f"PaddleOCR {getattr(_poc,'__version__','v3')} ready", icon="🔍")
-    except Exception:
-        st.error("PaddleOCR not installed", icon="❌")
-
-    st.divider()
-
-   
-    files = st.file_uploader(
-        "Upload PDFs or images",
-        type=ALL_TYPES,
-        accept_multiple_files=True,
-        label_visibility="visible",
-        help="Supported: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP",
-    )
-
-    if st.button("⚡  Process Files"):
-        if not files:
-            st.warning("Upload at least one file first.")
-        else:
-            os.makedirs(UPLOAD_DIR, exist_ok=True)
-            for f in os.listdir(UPLOAD_DIR):
-                os.remove(os.path.join(UPLOAD_DIR, f))
-            for f in files:
-                dest = os.path.join(UPLOAD_DIR, f.name)
-                with open(dest, "wb") as fh:
-                    fh.write(f.getvalue())
-
-            st.session_state.doc_names = [f.name for f in files]
-
-            ok = ingest_all(UPLOAD_DIR)
-            if ok:
-                st.session_state.messages = []
-                st.rerun()
-
-   
-    if st.session_state.process_log:
-        st.divider()
-        st.markdown("**Ingestion log**")
-        for entry in st.session_state.process_log:
-            st.markdown(f"<small>{entry}</small>", unsafe_allow_html=True)
-
-    
-    if st.session_state.doc_names:
-        st.divider()
-        st.markdown("**Loaded files**")
-        for name in st.session_state.doc_names:
-            ext = Path(name).suffix.lower()
-            icon = "🖼️" if ext.lstrip(".") in IMAGE_TYPES else "📄"
-            st.markdown(f"<small>{icon} {name}</small>", unsafe_allow_html=True)
-
-    st.divider()
-    if st.button("🗑️  Clear Chat"):
-        st.session_state.messages = []
-        st.rerun()
-
-    st.caption("Groq · LangChain · OpenAI Embeddings · PaddleOCR v3")
-
-
-
-st.markdown("# DocMe")
-st.caption("Ask questions about your uploaded PDFs and images.")
-st.divider()
-
-if not st.session_state.ready:
-    st.info(
-        "👈  Upload **PDFs or images** in the sidebar and click **Process Files**.",
-        icon="📂",
-    )
-    st.stop()
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-if user_input := st.chat_input("Ask anything about your files…"):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
-            try:
-                answer = ask(user_input)
-            except Exception as exc:
-                answer = f"⚠️ Error: {exc}"
-        st.markdown(answer)
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
